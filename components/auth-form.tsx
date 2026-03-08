@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { Lock, Phone, CheckCircle } from 'lucide-react';
+import { Lock, Phone, CheckCircle, MessageSquare, ArrowLeft } from 'lucide-react';
 
 export function AuthForm() {
   const router = useRouter();
@@ -14,6 +14,8 @@ export function AuthForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [existingSession, setExistingSession] = useState<{ phone: string; lastUsed: string } | null>(null);
+  const [step, setStep] = useState<'phone' | 'pin'>('phone');
+  const [smsSent, setSmsSent] = useState(false);
 
   // Load existing session on mount
   useEffect(() => {
@@ -47,14 +49,39 @@ export function AuthForm() {
     }
   };
 
+  const handleSendSms = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
+    try {
+      if (!phoneNumber) {
+        setError('Veuillez entrer votre numero de telephone');
+        setIsLoading(false);
+        return;
+      }
+
+      // Simulate SMS sending (in production, this would call your SMS API)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setSmsSent(true);
+      setStep('pin');
+    } catch (err) {
+      setError('Erreur lors de l\'envoi du SMS. Veuillez reessayer.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
     try {
-      if (!phoneNumber || !pin) {
-        setError('Veuillez entrer le numéro de téléphone et le code PIN');
+      if (!pin) {
+        setError('Veuillez entrer le code PIN recu par SMS');
+        setIsLoading(false);
         return;
       }
 
@@ -126,60 +153,117 @@ export function AuthForm() {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Numéro de téléphone</label>
-              <div className="relative">
-                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  type="tel"
-                  placeholder="+49 123 456789"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  className="pl-10"
-                  disabled={isLoading}
-                />
+          {step === 'phone' ? (
+            <form onSubmit={handleSendSms} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Numero de telephone</label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    type="tel"
+                    placeholder="+49 123 456789"
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    className="pl-10"
+                    disabled={isLoading}
+                  />
+                </div>
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Code PIN</label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  type="password"
-                  placeholder="••••••"
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value)}
-                  className="pl-10"
-                  disabled={isLoading}
-                />
+              {error && (
+                <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20">
+                  <p className="text-sm text-destructive">{error}</p>
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+                disabled={isLoading || !phoneNumber}
+              >
+                <MessageSquare className="w-4 h-4 mr-2" />
+                {isLoading ? 'Envoi en cours...' : 'Envoyer un SMS'}
+              </Button>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {smsSent && (
+                <div className="p-3 rounded-lg bg-primary/10 border border-primary/20">
+                  <p className="text-sm text-primary">
+                    Un SMS a ete envoye au {phoneNumber}
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Numero de telephone</label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    type="tel"
+                    value={phoneNumber}
+                    className="pl-10 bg-muted"
+                    disabled={true}
+                  />
+                </div>
               </div>
-            </div>
 
-            {error && (
-              <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20">
-                <p className="text-sm text-destructive">{error}</p>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Code PIN</label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    type="password"
+                    placeholder="Entrez le code recu par SMS"
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value)}
+                    className="pl-10"
+                    disabled={isLoading}
+                    autoFocus
+                  />
+                </div>
               </div>
-            )}
 
-            <Button
-              type="submit"
-              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-              disabled={isLoading}
-            >
-              {isLoading ? 'Connexion en cours...' : 'Se connecter'}
-            </Button>
-          </form>
+              {error && (
+                <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20">
+                  <p className="text-sm text-destructive">{error}</p>
+                </div>
+              )}
 
-          {existingSession && (
+              <Button
+                type="submit"
+                className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+                disabled={isLoading || !pin}
+              >
+                {isLoading ? 'Connexion en cours...' : 'Se connecter'}
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                onClick={() => {
+                  setStep('phone');
+                  setPin('');
+                  setError('');
+                  setSmsSent(false);
+                }}
+                disabled={isLoading}
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Modifier le numero
+              </Button>
+            </form>
+          )}
+
+          {existingSession && step === 'phone' && (
             <div className="pt-4 border-t border-border space-y-3">
               <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
                 <CheckCircle className="w-5 h-5 text-primary flex-shrink-0" />
                 <div className="text-sm">
-                  <p className="font-medium text-foreground">Session trouvée</p>
+                  <p className="font-medium text-foreground">Session trouvee</p>
                   <p className="text-xs text-muted-foreground">
-                    {existingSession.phone} • Utilisée le {existingSession.lastUsed}
+                    {existingSession.phone} - Utilisee le {existingSession.lastUsed}
                   </p>
                 </div>
               </div>
@@ -190,18 +274,18 @@ export function AuthForm() {
                 variant="outline"
                 className="w-full"
               >
-                Reprendre la session
+                Reprendre la session (sans SMS)
               </Button>
               <p className="text-xs text-center text-muted-foreground">
-                Ou entrez d'autres identifiants ci-dessous
+                Ou entrez un autre numero ci-dessus
               </p>
             </div>
           )}
 
-          {!existingSession && (
+          {!existingSession && step === 'phone' && (
             <div className="pt-4 border-t border-border">
               <p className="text-xs text-center text-muted-foreground">
-                Les sessions sont sauvegardées 30 jours pour éviter les SMS répétés
+                Les sessions sont sauvegardees 30 jours pour eviter les SMS repetes
               </p>
             </div>
           )}
