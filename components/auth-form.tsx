@@ -67,13 +67,33 @@ export function AuthForm() {
         return;
       }
 
-      // Simulate SMS sending (in production, this would call your SMS API)
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log('[v0] Sending SMS request for:', phoneNumber);
+
+      const response = await fetch('/api/auth/sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: phoneNumber }),
+      });
+
+      const data = await response.json();
+      console.log('[v0] SMS API response:', data);
+
+      if (!response.ok || !data.success) {
+        setError(data.error || 'Erreur lors de l\'envoi du SMS');
+        setIsLoading(false);
+        return;
+      }
+
+      // If in development, show the debug code
+      if (data.debugCode) {
+        console.log('[v0] Debug verification code:', data.debugCode);
+      }
       
       setSmsSent(true);
       setStep('pin');
     } catch (err) {
-      setError('Erreur lors de l\'envoi du SMS. Veuillez reessayer.');
+      console.error('[v0] SMS send error:', err);
+      setError('Erreur de connexion. Verifiez votre connexion internet.');
     } finally {
       setIsLoading(false);
     }
@@ -91,8 +111,26 @@ export function AuthForm() {
         return;
       }
 
-      // Create new session
-      const response = await fetch('/api/auth/session', {
+      console.log('[v0] Verifying PIN for:', phoneNumber);
+
+      // First verify the SMS code
+      const verifyResponse = await fetch('/api/auth/sms', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: phoneNumber, code: pin }),
+      });
+
+      const verifyData = await verifyResponse.json();
+      console.log('[v0] Verify response:', verifyData);
+
+      if (!verifyResponse.ok || !verifyData.success) {
+        setError(verifyData.error || 'Code de verification invalide');
+        setIsLoading(false);
+        return;
+      }
+
+      // Code verified - create session
+      const sessionResponse = await fetch('/api/auth/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -102,8 +140,13 @@ export function AuthForm() {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('Création de session échouée');
+      const sessionData = await sessionResponse.json();
+      console.log('[v0] Session response:', sessionData);
+
+      if (!sessionResponse.ok) {
+        setError(sessionData.error || 'Erreur lors de la creation de session');
+        setIsLoading(false);
+        return;
       }
 
       // Store session locally
@@ -114,7 +157,8 @@ export function AuthForm() {
 
       router.push('/dashboard');
     } catch (err) {
-      setError('Erreur d\'authentification. Veuillez réessayer.');
+      console.error('[v0] Authentication error:', err);
+      setError('Erreur de connexion. Verifiez votre connexion internet.');
     } finally {
       setIsLoading(false);
     }
