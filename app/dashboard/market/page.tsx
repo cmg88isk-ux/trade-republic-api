@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { DashboardNav } from '@/components/dashboard-nav';
 import { MarketSnapshot } from '@/components/market-snapshot';
+import { ETFPrices } from '@/components/etf-prices';
 import { Card } from '@/components/ui/card';
 import { TrendingUp, TrendingDown, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -59,8 +60,9 @@ export default function MarketPage() {
         </div>
 
         {/* Market Snapshot */}
-        <div>
+        <div className="space-y-8">
           <MarketSnapshot />
+          <ETFPrices />
         </div>
 
         {/* Additional Info */}
