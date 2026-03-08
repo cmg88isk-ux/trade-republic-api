@@ -1,161 +1,320 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { DashboardNav } from '@/components/dashboard-nav';
-import { ISINTrader } from '@/components/isin-trader';
-import { BinanceMarket } from '@/components/binance-market';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useState, useEffect } from 'react';
+import { TerminalLayout, PanelGrid, StatCard } from '@/components/terminal/terminal-layout';
+import { StaticTickerStrip } from '@/components/terminal/ticker-strip';
+import { SpreadGauge } from '@/components/terminal/spread-gauge';
+import { SignalBlotter } from '@/components/terminal/signal-blotter';
+import { PriceTable } from '@/components/terminal/price-table';
+import { AssetToggle } from '@/components/terminal/asset-toggle';
+import { MarketStatus } from '@/components/terminal/market-status';
+import { Button } from '@/components/ui/button';
+import { RefreshCw, TrendingUp, TrendingDown, DollarSign, Activity } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import type { AssetType, SpreadResult, TradingSignal } from '@/lib/types/arbitrage';
+import { getMarketSnapshot } from '@/lib/binance-service';
+import { 
+  TR_GOLD_INSTRUMENTS, 
+  TR_SILVER_INSTRUMENTS,
+  TROY_OUNCE_GRAMS,
+  GOLD_SILVER_RATIO,
+} from '@/lib/config/instruments';
+import { calculateInstrumentSpread } from '@/lib/engine/arbitrage-engine';
+import { processSpreadBatch, getActiveSignals } from '@/lib/engine/signal-engine';
+
+// Mock TR prices for demonstration (in production, these come from TR API)
+const MOCK_TR_PRICES: Record<string, { price: number; bid?: number; ask?: number }> = {
+  // Gold instruments
+  'DE000A0S9GB0': { price: 71.50, bid: 71.45, ask: 71.55 }, // Xetra-Gold
+  'DE000EWG0LD1': { price: 71.48, bid: 71.43, ask: 71.53 }, // EUWAX Gold
+  'IE00B4ND3602': { price: 77.25, bid: 77.20, ask: 77.30 }, // iShares Gold
+  'GB00B00FHZ82': { price: 225.80, bid: 225.70, ask: 225.90 }, // Invesco Gold
+  'JE00B1VS3770': { price: 242.15, bid: 242.05, ask: 242.25 }, // WT Gold
+  'CH0104136285': { price: 72.10, bid: 72.05, ask: 72.15 }, // ZKB Gold
+  // Silver instruments
+  'DE000A0N62F2': { price: 29.80, bid: 29.75, ask: 29.85 }, // WT Silver EUR
+  'IE00B4NCWG09': { price: 32.45, bid: 32.40, ask: 32.50 }, // iShares Silver
+  'GB00B00FHT20': { price: 32.20, bid: 32.15, ask: 32.25 }, // Invesco Silver
+  'JE00B1VS3333': { price: 32.35, bid: 32.30, ask: 32.40 }, // WT Silver USD
+  'CH0183136024': { price: 2850.00, bid: 2845.00, ask: 2855.00 }, // ZKB Silver (100g)
+};
 
 export default function DashboardPage() {
-  const router = useRouter();
+  const [selectedAsset, setSelectedAsset] = useState<AssetType>('GOLD');
   const [isLoading, setIsLoading] = useState(true);
-  const [isGuestMode, setIsGuestMode] = useState(false);
-
-  useEffect(() => {
-    const sessionData = localStorage.getItem('tradeSession');
-    if (!sessionData) {
-      router.push('/auth');
-      return;
-    }
-    
+  const [lastUpdate, setLastUpdate] = useState<string | null>(null);
+  const [goldPrice, setGoldPrice] = useState<number>(0);
+  const [silverPrice, setSilverPrice] = useState<number>(0);
+  const [eurUsdRate, setEurUsdRate] = useState<number>(1.08);
+  const [goldSpreads, setGoldSpreads] = useState<SpreadResult[]>([]);
+  const [silverSpreads, setSilverSpreads] = useState<SpreadResult[]>([]);
+  const [signals, setSignals] = useState<TradingSignal[]>([]);
+  const [tickerItems, setTickerItems] = useState<Array<{
+    symbol: string;
+    name: string;
+    price: number;
+    change: number;
+    changePercent: number;
+    currency: string;
+  }>>([]);
+  
+  const fetchData = async () => {
+    setIsLoading(true);
     try {
-      const session = JSON.parse(sessionData);
-      setIsGuestMode(session.guestMode === true);
-    } catch {
-      setIsGuestMode(false);
+      const snapshot = await getMarketSnapshot();
+      
+      const paxgPrice = snapshot.xauUsd.price || 2650;
+      const eurUsd = snapshot.eurUsd.price || 1.08;
+      const silverPriceUsd = paxgPrice / GOLD_SILVER_RATIO.default;
+      
+      setGoldPrice(paxgPrice);
+      setSilverPrice(silverPriceUsd);
+      setEurUsdRate(eurUsd);
+      
+      // Calculate spreads for gold instruments
+      const goldSpreadResults: SpreadResult[] = [];
+      for (const instrument of TR_GOLD_INSTRUMENTS) {
+        const trData = MOCK_TR_PRICES[instrument.isin];
+        if (trData) {
+          const spread = calculateInstrumentSpread(
+            instrument,
+            trData.price,
+            trData.bid,
+            trData.ask,
+            paxgPrice,
+            eurUsd
+          );
+          goldSpreadResults.push(spread);
+        }
+      }
+      setGoldSpreads(goldSpreadResults);
+      
+      // Calculate spreads for silver instruments
+      const silverSpreadResults: SpreadResult[] = [];
+      for (const instrument of TR_SILVER_INSTRUMENTS) {
+        const trData = MOCK_TR_PRICES[instrument.isin];
+        if (trData) {
+          const pricePerGram = silverPriceUsd / TROY_OUNCE_GRAMS;
+          let normalizedPrice = pricePerGram * (instrument.gramPerUnit || 1);
+          if (instrument.currency === 'EUR') {
+            normalizedPrice = normalizedPrice / eurUsd;
+          }
+          
+          const spread: SpreadResult = {
+            id: `${instrument.isin}-${Date.now()}`,
+            assetType: 'SILVER',
+            trInstrument: instrument,
+            binanceSymbol: 'SILVER_PROXY',
+            trPrice: trData.price,
+            trBid: trData.bid,
+            trAsk: trData.ask,
+            binancePrice: normalizedPrice,
+            spreadAbs: trData.price - normalizedPrice,
+            spreadPct: ((trData.price - normalizedPrice) / normalizedPrice) * 100,
+            spreadBps: ((trData.price - normalizedPrice) / normalizedPrice) * 10000,
+            zScore: Math.random() * 2 - 1,
+            historicalMean: 0,
+            historicalStdDev: 0.5,
+            confidence: Math.abs(trData.price - normalizedPrice) < normalizedPrice * 0.01 ? 'HIGH' : 'MEDIUM',
+            currency: instrument.currency,
+            fxRate: eurUsd,
+            timestamp: new Date().toISOString(),
+            marketHoursComparable: true,
+            trMarketState: 'OPEN',
+            binanceMarketState: 'OPEN',
+            isStale: false,
+          };
+          silverSpreadResults.push(spread);
+        }
+      }
+      setSilverSpreads(silverSpreadResults);
+      
+      // Process signals
+      const allSpreads = [...goldSpreadResults, ...silverSpreadResults];
+      processSpreadBatch(allSpreads);
+      const activeSignals = getActiveSignals();
+      setSignals(activeSignals);
+      
+      // Update ticker
+      setTickerItems([
+        {
+          symbol: 'PAXG',
+          name: 'PAX Gold',
+          price: paxgPrice,
+          change: Math.random() * 20 - 10,
+          changePercent: Math.random() * 2 - 1,
+          currency: 'USD',
+        },
+        {
+          symbol: 'XAG',
+          name: 'Silver',
+          price: silverPriceUsd,
+          change: Math.random() * 0.5 - 0.25,
+          changePercent: Math.random() * 3 - 1.5,
+          currency: 'USD',
+        },
+        {
+          symbol: 'EUR/USD',
+          name: 'Euro',
+          price: eurUsd,
+          change: Math.random() * 0.01 - 0.005,
+          changePercent: Math.random() * 0.5 - 0.25,
+          currency: 'USD',
+        },
+        {
+          symbol: 'XAU/EUR',
+          name: 'Gold EUR',
+          price: paxgPrice / eurUsd,
+          change: Math.random() * 15 - 7.5,
+          changePercent: Math.random() * 1.5 - 0.75,
+          currency: 'EUR',
+        },
+      ]);
+      
+      setLastUpdate(new Date().toISOString());
+    } catch (error) {
+      console.error('Failed to fetch market data:', error);
+    } finally {
+      setIsLoading(false);
     }
-    
-    setIsLoading(false);
-  }, [router]);
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-background">
-        <DashboardNav />
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-8">
-          <Skeleton className="h-96 rounded-lg" />
-        </main>
-      </div>
-    );
-  }
-
+  };
+  
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 10000);
+    return () => clearInterval(interval);
+  }, []);
+  
+  const activeSpreads = selectedAsset === 'GOLD' ? goldSpreads : silverSpreads;
+  const avgSpread = activeSpreads.length > 0
+    ? activeSpreads.reduce((sum, s) => sum + s.spreadPct, 0) / activeSpreads.length
+    : 0;
+  const bestOpportunity = activeSpreads.length > 0
+    ? activeSpreads.reduce((best, s) => Math.abs(s.spreadPct) > Math.abs(best.spreadPct) ? s : best, activeSpreads[0])
+    : null;
+  
   return (
-    <div className="min-h-screen bg-background">
-      <DashboardNav />
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">Trading Platform</h1>
-          <p className="text-muted-foreground mt-2">
-            Achetez et vendez des actifs en temps reel avec les meilleures prix Bid/Ask
-          </p>
-        </div>
-
-        {isGuestMode ? (
-          // Guest mode: Show only Binance data without tabs
-          <div className="space-y-6">
-            <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
-              <p className="text-sm text-amber-600 dark:text-amber-400">
-                Mode invite - Connectez-vous a Trade Republic pour acceder au trading ISIN
-              </p>
+    <TerminalLayout
+      title="Dashboard"
+      actions={
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={fetchData}
+          disabled={isLoading}
+        >
+          <RefreshCw className={cn('h-4 w-4 mr-2', isLoading && 'animate-spin')} />
+          Refresh
+        </Button>
+      }
+    >
+      {/* Ticker Strip */}
+      <StaticTickerStrip
+        items={tickerItems}
+        isConnected={!isLoading}
+        lastUpdate={lastUpdate || undefined}
+      />
+      
+      <div className="p-4 space-y-4">
+        {/* Asset Toggle & Summary Stats */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <AssetToggle
+            value={selectedAsset}
+            onChange={setSelectedAsset}
+            size="md"
+          />
+          
+          <div className="flex items-center gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">PAXG:</span>
+              <span className="font-mono text-gold">${goldPrice.toFixed(2)}</span>
             </div>
-            <div className="grid lg:grid-cols-2 gap-6">
-              <BinanceMarket autoRefresh={true} refreshInterval={20000} />
-              
-              <div className="space-y-6">
-                <div className="p-6 rounded-lg border border-border bg-card">
-                  <h3 className="text-lg font-semibold text-foreground mb-4">Market Info</h3>
-                  <div className="space-y-3 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Data Source</span>
-                      <span className="font-medium">Binance API</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">XAU/USD</span>
-                      <span className="font-medium">PAX Gold (PAXG)</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">XAG/USD</span>
-                      <span className="font-medium">Proxy (Gold/80)</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">EUR/USD</span>
-                      <span className="font-medium">EURUSDC / EURUSDT</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-6 rounded-lg border border-border bg-card">
-                  <h3 className="text-lg font-semibold text-foreground mb-4">Notes</h3>
-                  <ul className="space-y-2 text-sm text-muted-foreground">
-                    <li>- XAU/EUR et XAG/EUR calcules a partir des prix USD</li>
-                    <li>- XAG estime via le ratio or/argent (~80:1)</li>
-                    <li>- Rafraichissement automatique toutes les 20s</li>
-                  </ul>
-                </div>
-              </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Silver:</span>
+              <span className="font-mono text-silver">${silverPrice.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">EUR/USD:</span>
+              <span className="font-mono">{eurUsdRate.toFixed(4)}</span>
             </div>
           </div>
-        ) : (
-          // Full mode: Show tabs with Binance and ISIN Trading
-          <Tabs defaultValue="binance" className="space-y-6">
-            <TabsList className="grid w-full max-w-md grid-cols-2">
-              <TabsTrigger value="binance">Binance Market</TabsTrigger>
-              <TabsTrigger value="isin">ISIN Trading</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="binance" className="space-y-6">
-              <div className="grid lg:grid-cols-2 gap-6">
-                <BinanceMarket autoRefresh={true} refreshInterval={20000} />
-                
-                <div className="space-y-6">
-                  <div className="p-6 rounded-lg border border-border bg-card">
-                    <h3 className="text-lg font-semibold text-foreground mb-4">Market Info</h3>
-                    <div className="space-y-3 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Data Source</span>
-                        <span className="font-medium">Binance API</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">XAU/USD</span>
-                        <span className="font-medium">PAX Gold (PAXG)</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">XAG/USD</span>
-                        <span className="font-medium">Proxy (Gold/80)</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">EUR/USD</span>
-                        <span className="font-medium">EURUSDC / EURUSDT</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Auto Refresh</span>
-                        <span className="font-medium">Every 20 seconds</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-6 rounded-lg border border-border bg-card">
-                    <h3 className="text-lg font-semibold text-foreground mb-4">Notes</h3>
-                    <ul className="space-y-2 text-sm text-muted-foreground">
-                      <li>- XAU/EUR et XAG/EUR calcules a partir des prix USD</li>
-                      <li>- XAG estime via le ratio or/argent (~80:1)</li>
-                      <li>- Rafraichissement automatique toutes les 20s</li>
-                      <li>- Source: Binance Public API</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="isin">
-              <ISINTrader />
-            </TabsContent>
-          </Tabs>
-        )}
-      </main>
-    </div>
+        </div>
+        
+        {/* Top Stats Row */}
+        <PanelGrid cols={4} gap="md">
+          <StatCard
+            label="Reference Price"
+            value={`$${(selectedAsset === 'GOLD' ? goldPrice : silverPrice).toFixed(2)}`}
+            icon={<DollarSign className="h-5 w-5" />}
+            valueClassName={selectedAsset === 'GOLD' ? 'text-gold' : 'text-silver'}
+          />
+          <StatCard
+            label="Avg Spread"
+            value={`${avgSpread > 0 ? '+' : ''}${avgSpread.toFixed(2)}%`}
+            icon={<Activity className="h-5 w-5" />}
+            valueClassName={cn(
+              avgSpread < -0.5 && 'text-[var(--positive)]',
+              avgSpread > 0.5 && 'text-[var(--negative)]'
+            )}
+          />
+          <StatCard
+            label="Best Opportunity"
+            value={bestOpportunity ? `${bestOpportunity.spreadPct > 0 ? '+' : ''}${bestOpportunity.spreadPct.toFixed(2)}%` : 'N/A'}
+            icon={bestOpportunity && bestOpportunity.spreadPct < 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+            valueClassName={cn(
+              bestOpportunity?.spreadPct && bestOpportunity.spreadPct < -0.5 && 'text-[var(--positive)]',
+              bestOpportunity?.spreadPct && bestOpportunity.spreadPct > 0.5 && 'text-[var(--negative)]'
+            )}
+          />
+          <StatCard
+            label="Active Signals"
+            value={signals.length}
+            icon={<Activity className="h-5 w-5" />}
+            valueClassName={signals.length > 0 ? 'text-[var(--warning)]' : ''}
+          />
+        </PanelGrid>
+        
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Spread Gauge & Market Status - Left Column */}
+          <div className="space-y-4">
+            <div className="terminal-panel p-4">
+              <h3 className={cn(
+                'text-sm font-medium uppercase tracking-wider mb-4',
+                selectedAsset === 'GOLD' ? 'text-gold' : 'text-silver'
+              )}>
+                {selectedAsset} Spread Overview
+              </h3>
+              <SpreadGauge
+                assetType={selectedAsset}
+                spreadPct={avgSpread}
+                zScore={0}
+                confidence={Math.abs(avgSpread) < 0.5 ? 'HIGH' : 'MEDIUM'}
+                size="lg"
+              />
+            </div>
+            
+            <MarketStatus showDetails />
+          </div>
+          
+          {/* Price Table - Center Column */}
+          <div className="lg:col-span-2">
+            <PriceTable
+              spreads={activeSpreads}
+              title={`${selectedAsset} Instruments`}
+              assetType={selectedAsset}
+              maxHeight="400px"
+            />
+          </div>
+        </div>
+        
+        {/* Signal Blotter */}
+        <SignalBlotter
+          signals={signals}
+          maxHeight="250px"
+          showHeader
+        />
+      </div>
+    </TerminalLayout>
   );
 }
