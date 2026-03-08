@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { Lock, Phone, CheckCircle, MessageSquare, ArrowLeft } from 'lucide-react';
+import { Lock, Phone, CheckCircle, MessageSquare, ArrowLeft, TrendingUp } from 'lucide-react';
 
 export function AuthForm() {
   const router = useRouter();
@@ -164,6 +164,16 @@ export function AuthForm() {
     }
   };
 
+  const handleSkipTradeRepublic = () => {
+    // Allow access to Binance data without Trade Republic connection
+    localStorage.setItem('tradeSession', JSON.stringify({
+      phoneNumber: 'guest',
+      timestamp: new Date().toISOString(),
+      guestMode: true,
+    }));
+    router.push('/dashboard');
+  };
+
   const handleResumeSession = async () => {
     if (!existingSession?.phone) return;
     
@@ -199,7 +209,7 @@ export function AuthForm() {
             </div>
             <h1 className="text-2xl font-bold text-foreground">TradeFlow</h1>
             <p className="text-sm text-muted-foreground">
-              Connectez-vous à votre compte
+              Connectez-vous a votre compte
             </p>
           </div>
 
@@ -332,10 +342,19 @@ export function AuthForm() {
             </div>
           )}
 
-          {!existingSession && step === 'phone' && (
-            <div className="pt-4 border-t border-border">
+          {step === 'phone' && (
+            <div className="pt-4 border-t border-border space-y-3">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={handleSkipTradeRepublic}
+              >
+                <TrendingUp className="w-4 h-4 mr-2" />
+                Continuer sans Trade Republic
+              </Button>
               <p className="text-xs text-center text-muted-foreground">
-                Les sessions sont sauvegardees 30 jours pour eviter les SMS repetes
+                Acces aux donnees Binance uniquement (XAU, XAG, EUR)
               </p>
             </div>
           )}

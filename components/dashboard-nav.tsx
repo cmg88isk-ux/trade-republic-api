@@ -1,12 +1,27 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { BarChart3, LogOut } from 'lucide-react';
+import { BarChart3, LogOut, User } from 'lucide-react';
+
 export function DashboardNav() {
   const router = useRouter();
   const pathname = usePathname();
+  const [isGuestMode, setIsGuestMode] = useState(false);
+
+  useEffect(() => {
+    const sessionData = localStorage.getItem('tradeSession');
+    if (sessionData) {
+      try {
+        const session = JSON.parse(sessionData);
+        setIsGuestMode(session.guestMode === true);
+      } catch {
+        setIsGuestMode(false);
+      }
+    }
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('tradeSession');
@@ -49,15 +64,23 @@ export function DashboardNav() {
             })}
           </div>
 
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleLogout}
-            className="text-muted-foreground hover:text-foreground"
-            title="Déconnexion"
-          >
-            <LogOut className="w-5 h-5" />
-          </Button>
+          <div className="flex items-center gap-3">
+            {isGuestMode && (
+              <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-amber-500/10 border border-amber-500/20">
+                <User className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Invite</span>
+              </div>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleLogout}
+              className="text-muted-foreground hover:text-foreground"
+              title="Deconnexion"
+            >
+              <LogOut className="w-5 h-5" />
+            </Button>
+          </div>
         </div>
       </div>
     </nav>
